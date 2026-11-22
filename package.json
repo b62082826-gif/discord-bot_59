@@ -1,0 +1,16 @@
+{
+  "name": "oh-bot",
+  "version": "1.0.0",
+  "description": "Discord bot: role panel, update announcer, tickets and rules, using application emojis (oh_*)",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.22.1",
+    "dotenv": "^16.4.5"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
