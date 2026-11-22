@@ -1,5 +1,3 @@
-require('dotenv').config();
-
 const fs = require('fs');
 const {
   Client,
@@ -22,16 +20,19 @@ const {
   MediaGalleryItemBuilder,
 } = require('discord.js');
 
-const {
-  DISCORD_TOKEN,
-  GUILD_ID,
-  SUPPORT_ROLE_ID,
-  TICKET_CATEGORY_ID,
-  TICKET_IMAGE_URL,
-} = process.env;
+// ---------------------------------------------------------------------------
+// SETTINGS: fill these in. Keep the quotes, and never share this file with
+// your token inside it. 
+// ---------------------------------------------------------------------------
+const DISCORD_TOKEN = ''; // required
+const GUILD_ID = '1571827346477154315'; // required
 
-if (!DISCORD_TOKEN || !GUILD_ID) {
-  console.error('Missing DISCORD_TOKEN or GUILD_ID in .env');
+const SUPPORT_ROLE_ID = '1573882050501410917'; // optional: role that can see tickets
+const TICKET_CATEGORY_ID = '1573881204271358083'; // optional: category for new tickets
+const TICKET_IMAGE_URL = 'https://i.pinimg.com/736x/e8/22/63/e82263280adc7c0ef0c779c01832cd5b.jpg'; // optional: image link for the ticket panel
+
+if (DISCORD_TOKEN.startsWith('PUT_') || GUILD_ID.startsWith('PUT_')) {
+  console.error('Open index.js and fill in DISCORD_TOKEN and GUILD_ID first.');
   process.exit(1);
 }
 
@@ -40,21 +41,46 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const FENCE = '`'.repeat(3);
 const COLOR = 0xff3b5c;
 
-// ---------------------------------------------------------------------------
-// Edit this list to change the rules panel
-// ---------------------------------------------------------------------------
 const RULES = [
-  'Be respectful to everyone. No harassment, hate speech or drama.',
-  'No spam, self-promotion or unsolicited ads.',
-  'Keep every topic in the right channel.',
-  'No illegal, harmful or NSFW content.',
-  'Listen to the staff team. Their decision is final.',
-  'Follow the Discord Terms of Service and Community Guidelines.',
+  '📜 RULE 01 — RESPECT EVERYONE\nTreat all members with respect. Harassment, bullying, discrimination, hate speech and personal attacks are strictly prohibited.\n⚖️ Punishment: Warning → Timeout 24 Hours → Ban.',
+
+  '🚫 RULE 02 — NO SPAM\nDo not flood channels with repeated messages, excessive emojis, stickers, images or unnecessary content.\n⚖️ Punishment: Message Deletion → Warning → Timeout 6 Hours.',
+
+  '📢 RULE 03 — NO UNAUTHORIZED ADVERTISING\nAdvertising other servers, websites, products, services or social media accounts without staff permission is prohibited.\n⚖️ Punishment: Message Deletion → Timeout 24 Hours → Permanent Ban.',
+
+  '📂 RULE 04 — USE THE CORRECT CHANNELS\nPost messages, questions, suggestions and reports in their appropriate channels. Keep discussions organized and relevant.\n⚖️ Punishment: Reminder → Warning → Timeout 30 Minutes.',
+
+  '🔞 RULE 05 — NO NSFW CONTENT\nExplicit images, videos, sexual content and other inappropriate materials are strictly prohibited throughout the server.\n⚖️ Punishment: Content Removal → Timeout 7 Days → Permanent Ban.',
+
+  '🦠 RULE 06 — NO MALICIOUS FILES OR LINKS\nDo not distribute malware, viruses, phishing links, suspicious downloads or files intended to damage devices or steal information.\n⚖️ Punishment: Immediate Permanent Ban for serious violations.',
+
+  '🎭 RULE 07 — NO IMPERSONATION\nDo not impersonate administrators, moderators, developers, other members or official WebGrabber representatives.\n⚖️ Punishment: Warning → Timeout 24 Hours → Permanent Ban.',
+
+  '🔐 RULE 08 — RESPECT PRIVACY\nNever share another person's private information, personal conversations, passwords, account details or confidential information without permission.\n⚖️ Punishment: Timeout 7 Days → Permanent Ban.',
+
+  '⚖️ RULE 09 — FOLLOW STAFF INSTRUCTIONS\nRespect moderators and administrators. Follow reasonable instructions and cooperate with moderation procedures.\n⚖️ Punishment: Warning → Timeout 24 Hours → Ban.',
+
+  '🔗 RULE 10 — NO SUSPICIOUS LINKS\nDo not share phishing websites, fake downloads, fraudulent links, misleading redirects or suspicious URLs that may compromise other members.\n⚖️ Punishment: Link Removal → Timeout 24 Hours → Permanent Ban.',
+
+  '💬 RULE 11 — NO UNNECESSARY DRAMA\nAvoid starting arguments, spreading rumors, provoking members or intentionally creating conflicts that disrupt the community.\n⚖️ Punishment: Warning → Timeout 12 Hours → Timeout 3 Days.',
+
+  '🤖 RULE 12 — NO BOT OR COMMAND ABUSE\nDo not spam bot commands, exploit bot features, abuse automated systems or intentionally disrupt bot operations.\n⚖️ Punishment: Warning → Command Restriction → Timeout 24 Hours.',
+
+  '📨 RULE 13 — NO UNWANTED DIRECT MESSAGES\nDo not send unsolicited advertisements, spam, suspicious links, harassment or repeated unwanted messages to other members.\n⚖️ Punishment: Warning → Timeout 24 Hours → Permanent Ban.',
+
+  '🧩 RULE 14 — NO EXPLOITS OR UNAUTHORIZED ACCESS\nDo not exploit vulnerabilities, attempt unauthorized access to server systems or interfere with WebGrabber services and infrastructure.\n⚖️ Punishment: Immediate Permanent Ban for serious violations.',
+
+  '🐛 RULE 15 — REPORT BUGS RESPONSIBLY\nReport bugs, errors and technical problems through the designated channels. Do not intentionally abuse vulnerabilities or falsely report issues.\n⚖️ Punishment: Warning → Timeout 12 Hours for repeated abuse.',
+
+  '📌 RULE 16 — NO FALSE REPORTS\nDo not submit fabricated reports, manipulate evidence or intentionally make false accusations against other members or staff.\n⚖️ Punishment: Warning → Timeout 24 Hours → Timeout 7 Days.',
+
+  '🔄 RULE 17 — NO BAN OR TIMEOUT EVASION\nDo not use alternate accounts, other members or unauthorized methods to bypass active moderation punishments.\n⚖️ Punishment: Extended Ban or Permanent Ban.',
+
+  '🌐 RULE 18 — NO ILLEGAL ACTIVITIES\nDo not use this server to promote, organize, distribute or participate in illegal activities or harmful behavior.\n⚖️ Punishment: Immediate Permanent Ban for serious violations.',
+
+  '📋 RULE 19 — FOLLOW DISCORD TERMS OF SERVICE\nAll members must follow Discord Terms of Service and Community Guidelines. Violations of Discord policies may result in immediate moderation action or reports to Discord.\n⚖️ Punishment: Warning → Timeout → Permanent Ban, depending on severity.'
 ];
 
-// ---------------------------------------------------------------------------
-// Ticket counter (saved to a file so numbers survive restarts)
-// ---------------------------------------------------------------------------
 const COUNTER_FILE = 'ticket_counters.json';
 
 function loadCounter() {
