@@ -24,7 +24,7 @@ const {
 // SETTINGS: fill these in. Keep the quotes, and never share this file with
 // your token inside it. 
 // ---------------------------------------------------------------------------
-const DISCORD_TOKEN = ''; // required
+const DISCORD_TOKEN = process.env.DISCORD_TOKEN || ''; // required: paste the token inside the '' here, or set DISCORD_TOKEN on your host
 const GUILD_ID = '1571827346477154315'; // required
 
 const SUPPORT_ROLE_ID = '1573882050501410917'; // optional: role that can see tickets
