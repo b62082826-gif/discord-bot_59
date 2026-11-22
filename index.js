@@ -31,8 +31,12 @@ const SUPPORT_ROLE_ID = '1573882050501410917'; // optional: role that can see ti
 const TICKET_CATEGORY_ID = '1573881204271358083'; // optional: category for new tickets
 const TICKET_IMAGE_URL = 'https://i.pinimg.com/736x/e8/22/63/e82263280adc7c0ef0c779c01832cd5b.jpg'; // optional: image link for the ticket panel
 
-if (DISCORD_TOKEN.startsWith('PUT_') || GUILD_ID.startsWith('PUT_')) {
-  console.error('Open index.js and fill in DISCORD_TOKEN and GUILD_ID first.');
+if (!DISCORD_TOKEN.trim() || DISCORD_TOKEN.startsWith('PUT_')) {
+  console.error('DISCORD_TOKEN is empty. Open index.js (line 27) and paste your bot token between the quotes.');
+  process.exit(1);
+}
+if (!GUILD_ID.trim() || GUILD_ID.startsWith('PUT_')) {
+  console.error('GUILD_ID is empty. Open index.js (line 28) and paste your server ID between the quotes.');
   process.exit(1);
 }
 
@@ -194,19 +198,45 @@ const commands = [
 // Rules
 // ---------------------------------------------------------------------------
 async function handleRulesCommand(interaction) {
-  const lines = [
-    `# ${emoji('oh_rules', '📜')} Server Rules`,
-    '',
-    ...RULES.map((r, i) => `${emoji('oh_check', '🎋')} **${i + 1}.** ${r}`),
-  ];
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-  const container = card()
-    .addTextDisplayComponents(text(lines.join('\n')))
-    .addSeparatorComponents(divider(SeparatorSpacingSize.Small))
-    .addTextDisplayComponents(text('-# By staying in this server you agree to follow these rules.'));
+  // A Components V2 message can hold about 4000 characters of text and 40
+  // components in total, so long rule lists are split into several cards.
+  const MAX_CHARS = 2400;
+  const pages = [];
+  let current = [];
+  let size = 0;
+  for (const rule of RULES) {
+    if (current.length && size + rule.length > MAX_CHARS) {
+      pages.push(current);
+      current = [];
+      size = 0;
+    }
+    current.push(rule);
+    size += rule.length + 2;
+  }
+  if (current.length) pages.push(current);
 
-  await send(interaction.channel, container);
-  await interaction.reply({ content: 'Rules posted.', flags: MessageFlags.Ephemeral });
+  for (let p = 0; p < pages.length; p++) {
+    const container = card();
+    if (p === 0) {
+      container
+        .addTextDisplayComponents(text(`# ${emoji('oh_rules', '📜')} Server Rules`))
+        .addSeparatorComponents(divider(SeparatorSpacingSize.Small));
+    }
+    pages[p].forEach((rule, i) => {
+      if (i > 0) container.addSeparatorComponents(divider(SeparatorSpacingSize.Small));
+      container.addTextDisplayComponents(text(rule));
+    });
+    if (p === pages.length - 1) {
+      container
+        .addSeparatorComponents(divider(SeparatorSpacingSize.Small))
+        .addTextDisplayComponents(text('-# By staying in this server you agree to follow these rules.'));
+    }
+    await send(interaction.channel, container);
+  }
+
+  await interaction.editReply({ content: `Rules posted (${pages.length} cards).` });
 }
 
 // ---------------------------------------------------------------------------
