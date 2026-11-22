@@ -56,8 +56,8 @@ const RULES = [
 
   '🎭 RULE 07 — NO IMPERSONATION\nDo not impersonate administrators, moderators, developers, other members or official WebGrabber representatives.\n⚖️ Punishment: Warning → Timeout 24 Hours → Permanent Ban.',
 
-  '🔐 RULE 08 — RESPECT PRIVACY\nNever share another person's private information, personal conversations, passwords, account details or confidential information without permission.\n⚖️ Punishment: Timeout 7 Days → Permanent Ban.',
-
+  '🔐 RULE 08 — RESPECT PRIVACY\nNever share another person\'s private information, personal conversations, passwords, account details or confidential information without permission.\n⚖️ Punishment: Timeout 7 Days → Permanent Ban.',
+  
   '⚖️ RULE 09 — FOLLOW STAFF INSTRUCTIONS\nRespect moderators and administrators. Follow reasonable instructions and cooperate with moderation procedures.\n⚖️ Punishment: Warning → Timeout 24 Hours → Ban.',
 
   '🔗 RULE 10 — NO SUSPICIOUS LINKS\nDo not share phishing websites, fake downloads, fraudulent links, misleading redirects or suspicious URLs that may compromise other members.\n⚖️ Punishment: Link Removal → Timeout 24 Hours → Permanent Ban.',
