@@ -1,13 +1,12 @@
 {
   "name": "oh-bot",
   "version": "1.0.0",
-  "description": "Discord bot: role panel, update announcer, tickets and rules, using application emojis (oh_*)",
+  "description": "Mahiru Auto Quest Discord Bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "axios": "^1.7.9",
     "discord.js": "^14.16.3",
     "dotenv": "^16.4.7"
   },
