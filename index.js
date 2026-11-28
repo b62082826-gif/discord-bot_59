@@ -41,7 +41,7 @@ function buildPanel({ title, image, code }) {
     );
 }
 
-// ---------- Verify panel (ปุ่มยืนยันตัวตนเพื่อรับยศ) ----------
+// ---------- Verify panel (button that grants a role) ----------
 // The role id is stored inside the button's customId, so the button keeps
 // working after the bot restarts and no database is needed.
 function buildVerifyPanel({ title, description, label, roleId }) {
@@ -77,19 +77,19 @@ client.once(Events.ClientReady, async (c) => {
 
   const verifySetup = new SlashCommandBuilder()
     .setName('verify-setup')
-    .setDescription('ส่งแผงยืนยันตัวตน กดปุ่มแล้วรับยศ')
+    .setDescription('Post a verification panel: click the button to get a role')
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addRoleOption((o) =>
-      o.setName('role').setDescription('ยศที่จะให้เมื่อยืนยันสำเร็จ').setRequired(true),
+      o.setName('role').setDescription('Role given after verifying').setRequired(true),
     )
     .addStringOption((o) =>
-      o.setName('title').setDescription('หัวข้อ (ค่าเริ่มต้น: ยืนยันตัวตน)').setMaxLength(200),
+      o.setName('title').setDescription('Panel title (default: Verification)').setMaxLength(200),
     )
     .addStringOption((o) =>
-      o.setName('description').setDescription('ข้อความอธิบาย').setMaxLength(1500),
+      o.setName('description').setDescription('Panel description text').setMaxLength(1500),
     )
     .addStringOption((o) =>
-      o.setName('button').setDescription('ข้อความบนปุ่ม (ค่าเริ่มต้น: ยืนยัน)').setMaxLength(80),
+      o.setName('button').setDescription('Button label (default: Verify)').setMaxLength(80),
     );
 
   await c.application.commands.set([panel.toJSON(), verifySetup.toJSON()]);
@@ -142,25 +142,25 @@ client.on(Events.InteractionCreate, async (interaction) => {
       // Check up front that the bot can actually hand this role out
       if (!me.permissions.has(PermissionFlagsBits.ManageRoles)) {
         await interaction.reply({
-          content: 'บอทไม่มีสิทธิ์ **Manage Roles** กรุณาเพิ่มสิทธิ์ให้บอทก่อน',
+          content: 'The bot is missing the **Manage Roles** permission. Please grant it first.',
           flags: MessageFlags.Ephemeral,
         });
         return;
       }
       if (role.managed || role.id === interaction.guild.id || role.comparePositionTo(me.roles.highest) >= 0) {
         await interaction.reply({
-          content: `บอทให้ยศ ${role} ไม่ได้ ต้องลากยศของบอทให้อยู่**สูงกว่า**ยศนี้ใน Server Settings → Roles (และห้ามเป็นยศ @everyone หรือยศของบอท/ระบบ)`,
+          content: `The bot cannot give ${role}. Drag the bot's role **above** it in Server Settings → Roles (it also can't be @everyone or a bot/integration role).`,
           flags: MessageFlags.Ephemeral,
         });
         return;
       }
 
       const panel = buildVerifyPanel({
-        title: interaction.options.getString('title') ?? 'ยืนยันตัวตน',
+        title: interaction.options.getString('title') ?? 'Verification',
         description:
           interaction.options.getString('description') ??
-          `กดปุ่มด้านล่างเพื่อยืนยันตัวตนและรับยศ ${role}`,
-        label: interaction.options.getString('button') ?? 'ยืนยัน',
+          `Click the button below to verify and get the ${role} role.`,
+        label: interaction.options.getString('button') ?? 'Verify',
         roleId: role.id,
       });
 
@@ -168,7 +168,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         components: [panel],
         flags: MessageFlags.IsComponentsV2,
       });
-      await interaction.reply({ content: 'ส่งแผงยืนยันตัวตนแล้ว ✅', flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: 'Verification panel sent ✅', flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -179,14 +179,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       if (!role) {
         await interaction.reply({
-          content: 'ไม่พบยศนี้แล้ว (อาจถูกลบไป) กรุณาแจ้งแอดมิน',
+          content: 'This role no longer exists (it may have been deleted). Please tell an admin.',
           flags: MessageFlags.Ephemeral,
         });
         return;
       }
       if (interaction.member.roles.cache.has(role.id)) {
         await interaction.reply({
-          content: `คุณมียศ ${role} อยู่แล้ว ✅`,
+          content: `You already have the ${role} role ✅`,
           flags: MessageFlags.Ephemeral,
         });
         return;
@@ -194,7 +194,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       await interaction.member.roles.add(role, 'Verified via button');
       await interaction.reply({
-        content: `ยืนยันสำเร็จ! คุณได้รับยศ ${role} แล้ว 🎉`,
+        content: `Verified! You now have the ${role} role 🎉`,
         flags: MessageFlags.Ephemeral,
       });
       return;
