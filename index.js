@@ -12,6 +12,8 @@ const {
   TextInputStyle,
   ComponentType,
   AttachmentBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   ContainerBuilder,
   TextDisplayBuilder,
   SeparatorBuilder,
@@ -39,25 +41,70 @@ function buildPanel({ title, image, code }) {
     );
 }
 
+// ---------- Verify panel (ปุ่มยืนยันตัวตนเพื่อรับยศ) ----------
+// The role id is stored inside the button's customId, so the button keeps
+// working after the bot restarts and no database is needed.
+function buildVerifyPanel({ title, description, label, roleId }) {
+  return new ContainerBuilder()
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(`### ${title}`))
+    .addSeparatorComponents(
+      new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small),
+    )
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(description))
+    .addSeparatorComponents(
+      new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small),
+    )
+    .addActionRowComponents(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`verify:${roleId}`)
+          .setLabel(label)
+          .setEmoji('✅')
+          .setStyle(ButtonStyle.Success),
+      ),
+    );
+}
+
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 client.once(Events.ClientReady, async (c) => {
-  const command = new SlashCommandBuilder()
+  const panel = new SlashCommandBuilder()
     .setName('panel')
     .setDescription('Create or edit a panel in this channel')
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addAttachmentOption((o) => o.setName('file').setDescription('Image/GIF from your device'))
     .addBooleanOption((o) => o.setName('new').setDescription('Send a new panel instead of editing the latest one'));
 
-  await c.application.commands.set([command.toJSON()]);
+  const verifySetup = new SlashCommandBuilder()
+    .setName('verify-setup')
+    .setDescription('ส่งแผงยืนยันตัวตน กดปุ่มแล้วรับยศ')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addRoleOption((o) =>
+      o.setName('role').setDescription('ยศที่จะให้เมื่อยืนยันสำเร็จ').setRequired(true),
+    )
+    .addStringOption((o) =>
+      o.setName('title').setDescription('หัวข้อ (ค่าเริ่มต้น: ยืนยันตัวตน)').setMaxLength(200),
+    )
+    .addStringOption((o) =>
+      o.setName('description').setDescription('ข้อความอธิบาย').setMaxLength(1500),
+    )
+    .addStringOption((o) =>
+      o.setName('button').setDescription('ข้อความบนปุ่ม (ค่าเริ่มต้น: ยืนยัน)').setMaxLength(80),
+    );
+
+  await c.application.commands.set([panel.toJSON(), verifySetup.toJSON()]);
   console.log(`Logged in as ${c.user.tag}`);
 });
 
 // Find the bot's latest panel (within the last 50 messages)
+// Verify panels (they contain a button row) are skipped so /panel never edits them.
 async function findPanel(channel) {
   const messages = await channel.messages.fetch({ limit: 50 });
   return messages.find(
-    (m) => m.author.id === client.user.id && m.flags.has(MessageFlags.IsComponentsV2),
+    (m) =>
+      m.author.id === client.user.id &&
+      m.flags.has(MessageFlags.IsComponentsV2) &&
+      !m.components[0]?.components?.some((p) => p.type === ComponentType.ActionRow),
   );
 }
 
@@ -87,6 +134,73 @@ function input(id, label, value, max, style = TextInputStyle.Short) {
 
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
+    // ---------- /verify-setup ----------
+    if (interaction.isChatInputCommand() && interaction.commandName === 'verify-setup') {
+      const role = interaction.options.getRole('role', true);
+      const me = interaction.guild.members.me;
+
+      // Check up front that the bot can actually hand this role out
+      if (!me.permissions.has(PermissionFlagsBits.ManageRoles)) {
+        await interaction.reply({
+          content: 'บอทไม่มีสิทธิ์ **Manage Roles** กรุณาเพิ่มสิทธิ์ให้บอทก่อน',
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+      if (role.managed || role.id === interaction.guild.id || role.comparePositionTo(me.roles.highest) >= 0) {
+        await interaction.reply({
+          content: `บอทให้ยศ ${role} ไม่ได้ ต้องลากยศของบอทให้อยู่**สูงกว่า**ยศนี้ใน Server Settings → Roles (และห้ามเป็นยศ @everyone หรือยศของบอท/ระบบ)`,
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      const panel = buildVerifyPanel({
+        title: interaction.options.getString('title') ?? 'ยืนยันตัวตน',
+        description:
+          interaction.options.getString('description') ??
+          `กดปุ่มด้านล่างเพื่อยืนยันตัวตนและรับยศ ${role}`,
+        label: interaction.options.getString('button') ?? 'ยืนยัน',
+        roleId: role.id,
+      });
+
+      await interaction.channel.send({
+        components: [panel],
+        flags: MessageFlags.IsComponentsV2,
+      });
+      await interaction.reply({ content: 'ส่งแผงยืนยันตัวตนแล้ว ✅', flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    // ---------- Verify button ----------
+    if (interaction.isButton() && interaction.customId.startsWith('verify:')) {
+      const roleId = interaction.customId.split(':')[1];
+      const role = interaction.guild.roles.cache.get(roleId);
+
+      if (!role) {
+        await interaction.reply({
+          content: 'ไม่พบยศนี้แล้ว (อาจถูกลบไป) กรุณาแจ้งแอดมิน',
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+      if (interaction.member.roles.cache.has(role.id)) {
+        await interaction.reply({
+          content: `คุณมียศ ${role} อยู่แล้ว ✅`,
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      await interaction.member.roles.add(role, 'Verified via button');
+      await interaction.reply({
+        content: `ยืนยันสำเร็จ! คุณได้รับยศ ${role} แล้ว 🎉`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    // ---------- /panel ----------
     if (interaction.isChatInputCommand() && interaction.commandName === 'panel') {
       const old = interaction.options.getBoolean('new')
         ? null
@@ -157,7 +271,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
   } catch (error) {
     console.error(error);
     const msg = { content: 'Something went wrong. Check the permissions of the bot in this channel.', flags: MessageFlags.Ephemeral };
-    const send = interaction.deferred ? interaction.editReply(msg.content) : interaction.reply(msg);
+    const send = interaction.deferred
+      ? interaction.editReply(msg.content)
+      : interaction.replied
+        ? interaction.followUp(msg)
+        : interaction.reply(msg);
     await send.catch(() => {});
   }
 });
