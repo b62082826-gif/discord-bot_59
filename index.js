@@ -1,212 +1,130 @@
-require("dotenv").config();
-
+// Requires discord.js 14.19 or newer:  npm install discord.js@latest
 const {
-    Client,
-    GatewayIntentBits,
-    EmbedBuilder,
-    ActionRowBuilder,
-    ModalBuilder,
-    TextInputBuilder,
-    TextInputStyle,
-    ButtonBuilder,
-    ButtonStyle,
-    Events
-} = require("discord.js");
+  Client,
+  Events,
+  GatewayIntentBits,
+  MessageFlags,
+  PermissionFlagsBits,
+  SlashCommandBuilder,
+  ModalBuilder,
+  ActionRowBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+  ComponentType,
+  ContainerBuilder,
+  TextDisplayBuilder,
+  SeparatorBuilder,
+  SeparatorSpacingSize,
+  MediaGalleryBuilder,
+  MediaGalleryItemBuilder,
+} = require('discord.js');
 
-const DISCORD_TOKEN = process.env.DISCORD_TOKEN || "";
-const API_KEY = process.env.API_KEY || "";
-const API_BASE = process.env.API_BASE || "http://prem-eu3.bot-hosting.net:21693/api/q/aq";
+const TOKEN = process.env.TOKEN || 'YOUR_BOT_TOKEN';
 
-const BANNER_URL =
-    process.env.BANNER_URL ||
-    "https://cdn.discordapp.com/attachments/1498985180633759804/1504391719226048603/1c22b9ddc074b2480799a3bf4a03f28c.jpg?ex=6a06d178&is=6a057ff8&hm=76ecf6bb07251a1eabe80f8db370b0965d48848f8601d3594b0ba0895c1b5fc4";
+function buildPanel({ title, image, code }) {
+  return new ContainerBuilder()
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(`### ${title}`))
+    .addSeparatorComponents(
+      new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small),
+    )
+    .addMediaGalleryComponents(
+      new MediaGalleryBuilder().addItems(new MediaGalleryItemBuilder().setURL(image)),
+    )
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(`\`\`\`lua\n${code}\n\`\`\``),
+    );
+}
 
-const cooldown = new Set();
+const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent
-    ]
+client.once(Events.ClientReady, async (c) => {
+  const command = new SlashCommandBuilder()
+    .setName('panel')
+    .setDescription('Create or edit a panel in this channel')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addBooleanOption((o) => o.setName('new').setDescription('Send a new panel instead of editing the latest one'));
+
+  await c.application.commands.set([command.toJSON()]);
+  console.log(`Logged in as ${c.user.tag}`);
 });
 
-function truncate(str, max = 3800) {
-    if (!str) return "";
-    return str.length > max ? `${str.slice(0, max - 3)}...` : str;
+// Find the bot's latest panel (within the last 50 messages)
+async function findPanel(channel) {
+  const messages = await channel.messages.fetch({ limit: 50 });
+  return messages.find(
+    (m) => m.author.id === client.user.id && m.flags.has(MessageFlags.IsComponentsV2),
+  );
 }
 
-async function apiRequest(endpoint, body) {
-    const response = await fetch(`${API_BASE}${endpoint}`, {
-        method: "POST",
-        headers: {
-            "x-api-key": API_KEY,
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify(body)
-    });
-
-    const data = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
-        throw new Error(data.error || `HTTP Error ${response.status}`);
-    }
-
-    return data;
+// Read the current values to prefill the edit window
+function readPanel(message) {
+  const parts = message?.components[0]?.components;
+  if (!parts) return { title: '', image: '', code: '' };
+  const text = parts.filter((p) => p.type === ComponentType.TextDisplay);
+  const gallery = parts.find((p) => p.type === ComponentType.MediaGallery);
+  return {
+    title: text[0]?.content.replace(/^### /, '') ?? '',
+    image: gallery?.items[0]?.media.url ?? '',
+    code: text[1]?.content.replace(/^```lua\n|\n```$/g, '') ?? '',
+  };
 }
 
-function createAutoQuestModal() {
-    const tokenInput = new TextInputBuilder()
-        .setCustomId("token")
-        .setLabel("Discord Token")
-        .setPlaceholder("Paste your Discord token here...")
-        .setRequired(true)
-        .setStyle(TextInputStyle.Short);
-
-    return new ModalBuilder()
-        .setCustomId("aq_auto_modal")
-        .setTitle("🎉 Auto Quest")
-        .addComponents(new ActionRowBuilder().addComponents(tokenInput));
+function input(id, label, value, max, style = TextInputStyle.Short) {
+  const field = new TextInputBuilder()
+    .setCustomId(id)
+    .setLabel(label)
+    .setStyle(style)
+    .setMaxLength(max)
+    .setRequired(true);
+  if (value) field.setValue(value.slice(0, max));
+  return new ActionRowBuilder().addComponents(field);
 }
-
-function createDeleteTokenModal() {
-    const tokenInput = new TextInputBuilder()
-        .setCustomId("token")
-        .setLabel("Discord Token")
-        .setPlaceholder("Paste the token you want to clear...")
-        .setRequired(true)
-        .setStyle(TextInputStyle.Short);
-
-    return new ModalBuilder()
-        .setCustomId("aq_delete_modal")
-        .setTitle("🗑️ Delete My Token")
-        .addComponents(new ActionRowBuilder().addComponents(tokenInput));
-}
-
-client.once("ready", () => {
-    console.log(`✨ Logged in as ${client.user.tag}`);
-});
-
-client.on("messageCreate", async (msg) => {
-    if (msg.author.bot) return;
-
-    if (msg.content.trim().toLowerCase() === "!aq") {
-        const embed = new EmbedBuilder()
-            .setColor("#E9A8C8")
-            .setTitle("🍬 Mahiru")
-            .setDescription(
-                "✨ Auto Quest Service\n" +
-                "✨ ONLINE 24/7 Mahiru"
-            )
-            .setImage(BANNER_URL)
-            .setFooter({
-                text: "By Mahiru"
-            });
-
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId("btn_start_quest")
-                .setLabel("* Auto Quest *")
-                .setEmoji("🎉")
-                .setStyle(ButtonStyle.Success),
-            new ButtonBuilder()
-                .setCustomId("btn_delete_token")
-                .setLabel("Delete My Token")
-                .setEmoji("🗑️")
-                .setStyle(ButtonStyle.Danger)
-        );
-
-        await msg.reply({
-            embeds: [embed],
-            components: [row]
-        });
-    }
-});
 
 client.on(Events.InteractionCreate, async (interaction) => {
-    if (interaction.isButton()) {
-        if (interaction.customId !== "btn_start_quest" && interaction.customId !== "btn_delete_token") {
-            return;
-        }
+  try {
+    if (interaction.isChatInputCommand() && interaction.commandName === 'panel') {
+      const old = interaction.options.getBoolean('new')
+        ? null
+        : await findPanel(interaction.channel);
+      const data = readPanel(old);
 
-        if (cooldown.has(interaction.user.id)) {
-            return interaction.reply({
-                content: "⏳ Please wait a moment before clicking again.",
-                ephemeral: true
-            });
-        }
-
-        cooldown.add(interaction.user.id);
-        setTimeout(() => cooldown.delete(interaction.user.id), 3000);
-
-        if (interaction.customId === "btn_start_quest") {
-            return interaction.showModal(createAutoQuestModal());
-        }
-
-        if (interaction.customId === "btn_delete_token") {
-            return interaction.showModal(createDeleteTokenModal());
-        }
+      await interaction.showModal(
+        new ModalBuilder()
+          .setCustomId(`panel:${old?.id ?? 'new'}`)
+          .setTitle(old ? 'Edit panel' : 'Create panel')
+          .addComponents(
+            input('title', 'Title', data.title, 200),
+            input('image', 'Image/GIF link (https://...)', data.image, 1000),
+            input('code', 'Code box text', data.code, 1800, TextInputStyle.Paragraph),
+          ),
+      );
+      return;
     }
 
-    if (!interaction.isModalSubmit()) return;
+    if (interaction.isModalSubmit() && interaction.customId.startsWith('panel:')) {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const get = (id) => interaction.fields.getTextInputValue(id).trim();
+      const data = { title: get('title'), image: get('image'), code: get('code') };
 
-    // 1. AUTO QUEST SUBMIT
-    if (interaction.customId === "aq_auto_modal") {
-        const token = interaction.fields.getTextInputValue("token").trim();
-        await interaction.deferReply({ ephemeral: true });
+      if (!/^https?:\/\/\S+$/.test(data.image)) {
+        await interaction.editReply('The image link must start with http:// or https://');
+        return;
+      }
 
-        try {
-            const loading = new EmbedBuilder()
-                .setColor("#F4B8D1")
-                .setTitle("🍬 Mahiru")
-                .setDescription("⏳ Processing your quests, please wait...")
-                .setFooter({ text: "By Mahiru" })
-                .setTimestamp();
+      const payload = { components: [buildPanel(data)], flags: MessageFlags.IsComponentsV2 };
+      const id = interaction.customId.split(':')[1];
 
-            await interaction.editReply({ embeds: [loading] });
+      if (id === 'new') await interaction.channel.send(payload);
+      else await (await interaction.channel.messages.fetch(id)).edit(payload);
 
-            const data = await apiRequest("", { token });
-            const stats = data.stats || {};
-            const logs = (data.logs || [])
-                .slice(-15)
-                .map((x) => `• ${x.text || x}`)
-                .join("\n");
-
-            const result = new EmbedBuilder()
-                .setColor((stats.failed || 0) > 0 ? "#F59E0B" : "#10B981")
-                .setTitle("🍬 Mahiru • Quest Result")
-                .setDescription("```text\n" + truncate(logs || "No logs available", 3000) + "\n```")
-                .addFields(
-                    { name: "✅ Success", value: String(stats.completed || 0), inline: true },
-                    { name: "❌ Failed", value: String(stats.failed || 0), inline: true },
-                    { name: "📌 Total", value: String(stats.total || 0), inline: true },
-                    { name: "📡 Status", value: String(stats.status || "unknown"), inline: true },
-                    { name: "💸 Cost", value: String(data.cost ?? 0), inline: true },
-                    { name: "💰 Balance", value: String(data.balance ?? 0), inline: true }
-                )
-                .setFooter({ text: "By Mahiru" })
-                .setTimestamp();
-
-            await interaction.editReply({ embeds: [result] });
-        } catch (err) {
-            const errEmbed = new EmbedBuilder()
-                .setColor("#EF4444")
-                .setTitle("🍬 Mahiru • Error")
-                .setDescription("```text\n" + truncate(err.message, 1500) + "\n```")
-                .setFooter({ text: "By Mahiru" })
-                .setTimestamp();
-
-            await interaction.editReply({ embeds: [errEmbed] });
-        }
+      await interaction.editReply('Done ✅');
     }
-
-    // 2. DELETE MY TOKEN SUBMIT (clears modal input & confirms privacy)
-    if (interaction.customId === "aq_delete_modal") {
-        await interaction.reply({
-            content: "🗑️ Your token input has been cleared and is never stored by this bot.",
-            ephemeral: true
-        });
-    }
+  } catch (error) {
+    console.error(error);
+    const msg = { content: 'Something went wrong. Check the permissions of the bot in this channel.', flags: MessageFlags.Ephemeral };
+    const send = interaction.deferred ? interaction.editReply(msg.content) : interaction.reply(msg);
+    await send.catch(() => {});
+  }
 });
 
-client.login(DISCORD_TOKEN);
+client.login(TOKEN);
