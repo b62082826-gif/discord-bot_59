@@ -11,6 +11,7 @@ const {
   TextInputBuilder,
   TextInputStyle,
   ComponentType,
+  AttachmentBuilder,
   ContainerBuilder,
   TextDisplayBuilder,
   SeparatorBuilder,
@@ -20,6 +21,9 @@ const {
 } = require('discord.js');
 
 const TOKEN = process.env.TOKEN || 'YOUR_BOT_TOKEN';
+
+// Files picked in /panel, kept until the edit window is submitted
+const uploads = new Map();
 
 function buildPanel({ title, image, code }) {
   return new ContainerBuilder()
@@ -42,6 +46,7 @@ client.once(Events.ClientReady, async (c) => {
     .setName('panel')
     .setDescription('Create or edit a panel in this channel')
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addAttachmentOption((o) => o.setName('file').setDescription('Image/GIF from your device'))
     .addBooleanOption((o) => o.setName('new').setDescription('Send a new panel instead of editing the latest one'));
 
   await c.application.commands.set([command.toJSON()]);
@@ -88,14 +93,25 @@ client.on(Events.InteractionCreate, async (interaction) => {
         : await findPanel(interaction.channel);
       const data = readPanel(old);
 
+      const file = interaction.options.getAttachment('file');
+      if (file && !file.contentType?.startsWith('image/')) {
+        await interaction.reply({ content: 'The file must be an image or GIF.', flags: MessageFlags.Ephemeral });
+        return;
+      }
+      if (file) uploads.set(interaction.user.id, file.url);
+      else uploads.delete(interaction.user.id);
+      if (file) data.image = file.url;
+
       await interaction.showModal(
         new ModalBuilder()
           .setCustomId(`panel:${old?.id ?? 'new'}`)
           .setTitle(old ? 'Edit panel' : 'Create panel')
           .addComponents(
-            input('title', 'Title', data.title, 200),
-            input('image', 'Image/GIF link (https://...)', data.image, 1000),
-            input('code', 'Code box text', data.code, 1800, TextInputStyle.Paragraph),
+            ...[
+              input('title', 'Title', data.title, 200),
+              file ? null : input('image', 'Image/GIF link (https://...)', data.image, 1000),
+              input('code', 'Code box text', data.code, 1800, TextInputStyle.Paragraph),
+            ].filter(Boolean),
           ),
       );
       return;
@@ -104,18 +120,37 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.isModalSubmit() && interaction.customId.startsWith('panel:')) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const get = (id) => interaction.fields.getTextInputValue(id).trim();
-      const data = { title: get('title'), image: get('image'), code: get('code') };
+      const uploaded = uploads.get(interaction.user.id);
+      const hasImageField = interaction.fields.fields.has('image');
+      const data = {
+        title: get('title'),
+        image: hasImageField ? get('image') : uploaded,
+        code: get('code'),
+      };
 
-      if (!/^https?:\/\/\S+$/.test(data.image)) {
-        await interaction.editReply('The image link must start with http:// or https://');
+      if (!/^https?:\/\/\S+$/.test(data.image ?? '')) {
+        await interaction.editReply('Use an http(s) image link, or run /panel again and attach a file.');
         return;
       }
 
-      const payload = { components: [buildPanel(data)], flags: MessageFlags.IsComponentsV2 };
+      // Discord-hosted files are re-uploaded with the message so the link does not expire
+      const files = [];
+      const url = new URL(data.image);
+      if (['cdn.discordapp.com', 'media.discordapp.net'].includes(url.hostname)) {
+        const ext = url.pathname.match(/\.(png|jpe?g|gif|webp)$/i)?.[0] ?? '.png';
+        files.push(new AttachmentBuilder(data.image, { name: `panel${ext.toLowerCase()}` }));
+        data.image = `attachment://${files[0].name}`;
+      }
+
+      const payload = {
+        components: [buildPanel(data)],
+        flags: MessageFlags.IsComponentsV2,
+        files,
+      };
       const id = interaction.customId.split(':')[1];
 
       if (id === 'new') await interaction.channel.send(payload);
-      else await (await interaction.channel.messages.fetch(id)).edit(payload);
+      else await (await interaction.channel.messages.fetch(id)).edit({ ...payload, attachments: [] });
 
       await interaction.editReply('Done ✅');
     }
