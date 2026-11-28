@@ -14,6 +14,7 @@ const {
   AttachmentBuilder,
   ButtonBuilder,
   ButtonStyle,
+  ChannelType,
   ContainerBuilder,
   TextDisplayBuilder,
   SeparatorBuilder,
@@ -65,6 +66,52 @@ function buildVerifyPanel({ title, description, label, roleId }) {
     );
 }
 
+// ---------- Ticket system ----------
+// Staff role and category are stored inside the button customIds, so the
+// system keeps working after restarts and needs no database.
+// Each ticket channel's topic is "ticket:<ownerId>", used to find the owner.
+function buildTicketPanel({ title, description, label, staffRoleId, categoryId }) {
+  return new ContainerBuilder()
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(`### ${title}`))
+    .addSeparatorComponents(
+      new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small),
+    )
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(description))
+    .addSeparatorComponents(
+      new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small),
+    )
+    .addActionRowComponents(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`ticket:open:${staffRoleId}:${categoryId ?? '0'}`)
+          .setLabel(label)
+          .setEmoji('🎫')
+          .setStyle(ButtonStyle.Primary),
+      ),
+    );
+}
+
+function buildTicketWelcome({ user, staffRoleId }) {
+  return new ContainerBuilder()
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(
+        `### 🎫 Ticket opened\nHello ${user}, describe your issue and <@&${staffRoleId}> will help you soon.`,
+      ),
+    )
+    .addSeparatorComponents(
+      new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small),
+    )
+    .addActionRowComponents(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`ticket:close:${staffRoleId}`)
+          .setLabel('Close ticket')
+          .setEmoji('🔒')
+          .setStyle(ButtonStyle.Danger),
+      ),
+    );
+}
+
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 client.once(Events.ClientReady, async (c) => {
@@ -92,7 +139,30 @@ client.once(Events.ClientReady, async (c) => {
       o.setName('button').setDescription('Button label (default: Verify)').setMaxLength(80),
     );
 
-  await c.application.commands.set([panel.toJSON(), verifySetup.toJSON()]);
+  const ticketSetup = new SlashCommandBuilder()
+    .setName('ticket-setup')
+    .setDescription('Post a ticket panel: click the button to open a private ticket')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addRoleOption((o) =>
+      o.setName('staff').setDescription('Staff role that can see and close tickets').setRequired(true),
+    )
+    .addChannelOption((o) =>
+      o
+        .setName('category')
+        .setDescription('Category where ticket channels are created')
+        .addChannelTypes(ChannelType.GuildCategory),
+    )
+    .addStringOption((o) =>
+      o.setName('title').setDescription('Panel title (default: Support)').setMaxLength(200),
+    )
+    .addStringOption((o) =>
+      o.setName('description').setDescription('Panel description text').setMaxLength(1500),
+    )
+    .addStringOption((o) =>
+      o.setName('button').setDescription('Button label (default: Open ticket)').setMaxLength(80),
+    );
+
+  await c.application.commands.set([panel.toJSON(), verifySetup.toJSON(), ticketSetup.toJSON()]);
   console.log(`Logged in as ${c.user.tag}`);
 });
 
@@ -197,6 +267,119 @@ client.on(Events.InteractionCreate, async (interaction) => {
         content: `Verified! You now have the ${role} role 🎉`,
         flags: MessageFlags.Ephemeral,
       });
+      return;
+    }
+
+    // ---------- /ticket-setup ----------
+    if (interaction.isChatInputCommand() && interaction.commandName === 'ticket-setup') {
+      const staff = interaction.options.getRole('staff', true);
+      const category = interaction.options.getChannel('category');
+      const me = interaction.guild.members.me;
+
+      if (!me.permissions.has(PermissionFlagsBits.ManageChannels)) {
+        await interaction.reply({
+          content: 'The bot is missing the **Manage Channels** permission. Please grant it first.',
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      const panel = buildTicketPanel({
+        title: interaction.options.getString('title') ?? 'Support',
+        description:
+          interaction.options.getString('description') ??
+          'Need help? Click the button below to open a private ticket with our staff.',
+        label: interaction.options.getString('button') ?? 'Open ticket',
+        staffRoleId: staff.id,
+        categoryId: category?.id,
+      });
+
+      await interaction.channel.send({
+        components: [panel],
+        flags: MessageFlags.IsComponentsV2,
+      });
+      await interaction.reply({ content: 'Ticket panel sent ✅', flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    // ---------- Ticket: open ----------
+    if (interaction.isButton() && interaction.customId.startsWith('ticket:open:')) {
+      const [, , staffRoleId, categoryId] = interaction.customId.split(':');
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+      // One open ticket per user
+      const existing = interaction.guild.channels.cache.find(
+        (ch) => ch.topic === `ticket:${interaction.user.id}`,
+      );
+      if (existing) {
+        await interaction.editReply(`You already have an open ticket: ${existing}`);
+        return;
+      }
+
+      const name = `ticket-${interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g, '') || interaction.user.id}`;
+      const channel = await interaction.guild.channels.create({
+        name: name.slice(0, 90),
+        type: ChannelType.GuildText,
+        parent: categoryId !== '0' ? categoryId : null,
+        topic: `ticket:${interaction.user.id}`,
+        permissionOverwrites: [
+          { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+          {
+            id: interaction.user.id,
+            allow: [
+              PermissionFlagsBits.ViewChannel,
+              PermissionFlagsBits.SendMessages,
+              PermissionFlagsBits.ReadMessageHistory,
+              PermissionFlagsBits.AttachFiles,
+            ],
+          },
+          {
+            id: staffRoleId,
+            allow: [
+              PermissionFlagsBits.ViewChannel,
+              PermissionFlagsBits.SendMessages,
+              PermissionFlagsBits.ReadMessageHistory,
+              PermissionFlagsBits.AttachFiles,
+            ],
+          },
+          {
+            id: client.user.id,
+            allow: [
+              PermissionFlagsBits.ViewChannel,
+              PermissionFlagsBits.SendMessages,
+              PermissionFlagsBits.ReadMessageHistory,
+              PermissionFlagsBits.ManageChannels,
+            ],
+          },
+        ],
+      });
+
+      await channel.send({
+        components: [buildTicketWelcome({ user: interaction.user, staffRoleId })],
+        flags: MessageFlags.IsComponentsV2,
+      });
+      await interaction.editReply(`Your ticket is ready: ${channel}`);
+      return;
+    }
+
+    // ---------- Ticket: close ----------
+    if (interaction.isButton() && interaction.customId.startsWith('ticket:close:')) {
+      const staffRoleId = interaction.customId.split(':')[2];
+      const ownerId = interaction.channel.topic?.replace('ticket:', '');
+      const isStaff =
+        interaction.member.roles.cache.has(staffRoleId) ||
+        interaction.member.permissions.has(PermissionFlagsBits.ManageChannels);
+
+      if (!isStaff && interaction.user.id !== ownerId) {
+        await interaction.reply({
+          content: 'Only the ticket owner or staff can close this ticket.',
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      await interaction.reply(`🔒 Ticket closed by ${interaction.user}. This channel will be deleted in 5 seconds.`);
+      setTimeout(() => interaction.channel.delete('Ticket closed').catch(console.error), 5000);
       return;
     }
 
